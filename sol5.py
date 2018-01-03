@@ -4,9 +4,11 @@ from scipy.misc import imread as imread
 from skimage.color import rgb2gray
 from scipy import signal as signal
 import matplotlib.pyplot as plt
-from keras.layers import Input, Convolution2D, Activation, add, merge
-from keras import Model
+from keras.layers import Input, Convolution2D, Activation, merge
+from keras.models import Model
 from keras.optimizers import Adam
+import random
+
 im_cache = {}
 def read_image(filename, representation):
     """
@@ -78,20 +80,63 @@ def build_nn_model(height, width, num_channels, num_res_blocks):
     model = merge([model, residual_block], mode='sum')
     model = Convolution2D(1, 3, 3, border_mode='same')(model)
     return Model(input=a, output=model)
+
+
+
 def train_model(model, images, corruption_func, batch_size,
                 samples_per_epoch, num_epochs, num_valid_samples):
-    pass
+    # splitting the images to 80-20 batches
+    valid_pts = np.random.choice(len(images), int(np.floor(0.8 * len(images))))
+    test_pts = [i for i in range(len(images)) if i not in valid_pts]
+    images = np.array(images)
+    #TODO: change (10, 10) tuples and get actual crop_size they want
+    test_generator = load_dataset(images[test_pts], batch_size, corruption_func, (10,10))
+    valid_generator = load_dataset(images[valid_pts], batch_size, corruption_func, (10,10))
+    Adam(beta_2=0.9)
+    model.compile(loss='mean_squared_error', optimizer='adam')
+    model.fit_generator(test_generator, samples_per_epoch, validation_data=valid_generator, nb_epoch=num_epochs,
+                        nb_val_samples=num_valid_samples)
+
+    return model
+
+
+def strech_helper(im):
+    """
+    A helper function for stretching the image
+    :param image: The input picture to be stretched
+    :param hist: The histogram of the input image
+    :return: The stretched image
+    """
+    return (im - np.min(im))/(np.max(im) - np.min(im))
+
+
+def add_gaussian_noise(image, min_sigma, max_sigma):
+    div = random.uniform(min_sigma, max_sigma)
+    # TODO: remove division by 255, figure how to add noise in correct scale
+    normal_noise = np.random.normal(0, scale=div, size=(image.shape[0], image.shape[1])) / 255
+    noisy_img = normal_noise + image
+    return np.clip(noisy_img, 0, 1)
 
 def func(im):
     im[0,:] = 0
     return im
 
-generator = load_dataset(["C:\ex1\gray_orig.png", "C:\ex1\pic2.jpg"], 1, func, (50,50))
-generator.__next__()
-generator.__next__()
-a = im_cache.get("kaki", None)
+import glob
+image_list = []
+for filename in glob.glob('C:\/Users\Imri\PycharmProjects\IP_ex5\ex5-imrilu\image_dataset\/train\*.jpg'):
+    image_list.append(filename)
 
-# print(a)
-# print(source.shape)
-# print(target.shape)
-build_nn_model(10,10,3,4)
+im = read_image(image_list[0], 1)
+# plt.imshow(im, cmap='gray')
+# plt.show()
+
+# print(image_list)
+#
+# generator = load_dataset(["C:\ex1\gray_orig.png", "C:\ex1\pic2.jpg"], 1, func, (50,50))
+#
+# model = build_nn_model(10,10,3,4)
+# model = train_model(model, image_list, func, 10, 5, 5, 5)
+
+noisy = add_gaussian_noise(im, 0.01, 0.11)
+plt.imshow(noisy, cmap='gray')
+plt.show()
