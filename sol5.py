@@ -32,7 +32,26 @@ def read_image(filename, representation):
     im_cache[filename] = im
     return im
 
+
+def strech_helper(im):
+    """
+    A helper function for stretching the image
+    :param image: The input picture to be stretched
+    :param hist: The histogram of the input image
+    :return: The stretched image
+    """
+    return (im - np.min(im))/(np.max(im) - np.min(im))
+
+
 def load_dataset(filenames, batch_size, corruption_func, crop_size):
+    """
+    A generator method for yielding batches of corrupted/original image patches of input size
+    :param filenames: The paths of image files to use
+    :param batch_size: The size of each batch in the generator
+    :param corruption_func: the corruption function to use
+    :param crop_size: the size of each patch we extract from the image
+    :return: generator, yielding each time a set of corrupted/original image patches
+    """
     while True:
         # corrupted pics
         source_batch = np.zeros(shape=(batch_size, 1, crop_size[0], crop_size[1]), dtype=np.float64)
@@ -54,16 +73,19 @@ def load_dataset(filenames, batch_size, corruption_func, crop_size):
                          int(crop_top_left_corner[1]):int(crop_top_left_corner[1]+crop_size[1])]
             cropped_im = im[int(crop_top_left_corner[0]):int(crop_top_left_corner[0]+crop_size[0]),
                          int(crop_top_left_corner[1]):int(crop_top_left_corner[1]+crop_size[1])]
-            source_batch[i][0] = org_corrupt
-            target_batch[i][0] = cropped_im
+            source_batch[i][0] = org_corrupt - 0.5
+            target_batch[i][0] = cropped_im - 0.5
 
-            # plt.imshow(source_batch[i][0], cmap='gray')
-            # plt.show()
-            # plt.imshow(target_batch[i][0], cmap='gray')
-            # plt.show()
         yield source_batch, target_batch
 
+
 def resblock(input_tensor, num_channels):
+    """
+    A method for creating 1 ResNet block
+    :param input_tensor: the input tensor we use in our model
+    :param num_channels: number of channels for the model
+    :return: a ResNet block
+    """
     res = Convolution2D(num_channels, 3, 3, border_mode='same', dim_ordering='th')(input_tensor)
     res = Activation('relu')(res)
     res = Convolution2D(num_channels, 3, 3, border_mode='same', dim_ordering='th')(res)
@@ -71,7 +93,16 @@ def resblock(input_tensor, num_channels):
     final = merge([input_tensor, res], mode='sum')
     return final
 
+
 def build_nn_model(height, width, num_channels, num_res_blocks):
+    """
+    A method for creating a model
+    :param height: The height of the input to the model
+    :param width: The width of the input to the model
+    :param num_channels: number of channels for the model
+    :param num_res_blocks: number of ResNet blocks that will be in the model
+    :return: A model as seen in pdf
+    """
     a = Input(shape=(1, height, width))
     model = Convolution2D(num_channels, 3, 3, border_mode='same', dim_ordering='th')(a)
     model = Activation('relu')(model)
@@ -86,9 +117,19 @@ def build_nn_model(height, width, num_channels, num_res_blocks):
     return Model(input=a, output=model)
 
 
-
 def train_model(model, images, corruption_func, batch_size,
                 samples_per_epoch, num_epochs, num_valid_samples):
+    """
+    A method for training a model on a set of images
+    :param model: The model to train
+    :param images: The batch of pictures to train on
+    :param corruption_func: The corruption function we use to train the network
+    :param batch_size: The size of each batch in the generator
+    :param samples_per_epoch: The number of samples per epochs
+    :param num_epochs: The number of epochs to use when training the model
+    :param num_valid_samples: The number of samples to use in validation phase
+    :return: A trained model
+    """
     # splitting the images to 80-20 batches
     valid_pts = np.random.choice(len(images), int(np.floor(0.8 * len(images))))
     test_pts = [i for i in range(len(images)) if i not in valid_pts]
@@ -101,79 +142,119 @@ def train_model(model, images, corruption_func, batch_size,
                         nb_val_samples=num_valid_samples)
     return model
 
+
 def add_motion_blur(image, kernel_size, angle):
+    """
+    A method for adding a motion blur effect to the image
+    :param image: the image to blur
+    :param kernel_size: the size of the kernel with which we convolve
+    :param angle: the angle of the motion blur to perform
+    :return: a blurred picture
+    """
     kernel = sol5_utils.motion_blur_kernel(kernel_size, angle)
     return ndimage.filters.convolve(image, kernel, mode='nearest')
 
-def helper_motion_blur(image):
-    return random_motion_blur(image, [7])
 
 def random_motion_blur(image, list_of_kernel_sizes):
+    """
+    A method for using motion blur on a pic with random angle
+    :param image: The image to blur
+    :param list_of_kernel_sizes: A list of odd integers. we'll sample a kernel from the list randomly and
+    use it when performing the convolution.
+    :return: A blurred picture
+    """
     rand_angle = np.random.uniform(0, np.pi)
-    #todo: change [7]
-    return add_motion_blur(image, 7, rand_angle)
+    kernel_size = int(np.random.choice(list_of_kernel_sizes, 1))
+    return add_motion_blur(image, kernel_size, rand_angle)
+
+
+def learn_deblurring_model(num_res_blocks=5, quick_mode=False):
+    """
+    A method for learning a model for deblurring images
+    :param num_res_blocks: the number of ResNet blocks to use when constructing the model
+    :param quick_mode: A boolean indicator for training in quick mode
+    :return: A fully trained model
+    """
+    images = sol5_utils.images_for_deblurring()
+    model = build_nn_model(16, 16, 32, num_res_blocks)
+    lambda_blur = lambda x: random_motion_blur(x, [7])
+    if quick_mode:
+        return train_model(model, images, lambda_blur, 10, 30, 2, 30)
+    else:
+        return train_model(model, images, lambda_blur, 100, 10000, 10, 1000)
+
+
+def add_gaussian_noise(image, min_sigma, max_sigma):
+    """
+    A function for adding a gaussian noise to a given picture
+    :param image: The image to add gaussian noise to
+    :param min_sigma: The min sigma range from which we will randomly sample a value
+    :param max_sigma: The max sigma range from which we will randomly sample a value
+    :return: A noisy picture
+    """
+    div = random.uniform(min_sigma, max_sigma)
+    # getting the normal noise, streching both the noise and the picture to values between 0-1
+    normal_noise = strech_helper(np.random.normal(0, scale=div, size=(image.shape[0], image.shape[1])))
+    image = strech_helper(image)
+    # TODO: remove division by 2, check if image is still corrupted in a good way
+    noisy_img = (normal_noise + image) / 2
+    return np.clip(noisy_img, 0, 1)
+
+
+def learn_denoising_model(num_res_blocks=5, quick_mode=False):
+    """
+    A method for learning a model for denoising pictures
+    :param num_res_blocks: The number of ResNet blocks to be in the trained model
+    :param quick_mode: A boolean to indicate if we're on quick mode
+    :return: A trained model for denoising pictures
+    """
+    images = sol5_utils.images_for_denoising()
+    model = build_nn_model(24, 24, 48, num_res_blocks)
+    lambda_noise = lambda x: add_gaussian_noise(x, 0, 0.2)
+    if quick_mode:
+        return train_model(model, images, lambda_noise, 10, 30, 2, 30)
+    else:
+        return train_model(model, images, lambda_noise, 100, 10000, 5, 1000)
+
 
 def restore_image(corrupted_image, base_model):
+    """
+    A method for restoring a corrupted image with a given base model
+    :param corrupted_image: The corrupted image to restore
+    :param base_model: The base model to use to restore the image
+    :return: The restored image
+    """
     a = Input(shape=(1, corrupted_image.shape[0], corrupted_image.shape[1]))
     b = base_model(a)
     new_model = Model(input=a, output=b)
     im = new_model.predict(np.reshape(np.array([corrupted_image]), (1, 1, corrupted_image.shape[0], corrupted_image.shape[1])))[0][0]
     return im
 
-def strech_helper(im):
-    """
-    A helper function for stretching the image
-    :param image: The input picture to be stretched
-    :param hist: The histogram of the input image
-    :return: The stretched image
-    """
-    return (im - np.min(im))/(np.max(im) - np.min(im))
-
-#todo: remove default values in def signature of min max sigma
-def add_gaussian_noise(image, min_sigma, max_sigma):
-    div = random.uniform(min_sigma, max_sigma)
-    # getting the normal noise, streching both the noise and the picture to values between 0-1
-    normal_noise = strech_helper(np.random.normal(0, scale=div, size=(image.shape[0], image.shape[1])))
-    image = strech_helper(image)
-    noisy_img = (normal_noise + image) / 2
-    return np.clip(noisy_img, 0, 1)
-
-
-def helper_noise(im):
-    return add_gaussian_noise(im, 0.5, 0.9)
-
-import glob
-image_list = []
-for filename in glob.glob('C:\/Users\Imri\PycharmProjects\IP_ex5\ex5-imrilu\image_dataset\/train\*.jpg'):
-    image_list.append(filename)
-
-im = read_image(image_list[0], 1)
-# plt.imshow(im, cmap='gray')
-# plt.show()
-
-# print(image_list)
-#
 
 images = sol5_utils.images_for_deblurring()
+# denoise_model = learn_denoising_model()
+# deblur_model = learn_deblurring_model()
 
-model = build_nn_model(16,16,32,5)
-model = train_model(model, images, helper_motion_blur, 100, 1000, 3, 100)
+denoise_model = build_nn_model(24, 24, 48, 5)
+deblur_model = build_nn_model(16, 16, 32, 5)
 
-specific = read_image(images[13], 1)
+denoise_model.load_weights("C:\/Users\Imri\PycharmProjects\IP_ex5\ex5-imrilu\denoise_model")
+deblur_model.load_weights("C:\/Users\Imri\PycharmProjects\IP_ex5\ex5-imrilu\deblur_model")
 
-plt.imshow(specific, cmap='gray')
-plt.show()
-im2 = helper_motion_blur(specific)
-plt.imshow(im2, cmap='gray')
-plt.show()
+im = read_image(images[16], 1)
 
-cropped = restore_image(im2, model)
-# cropped = strech_helper(cropped)
-
-plt.imshow(cropped, cmap='gray')
+# showing original picture
+plt.imshow(im, cmap='gray')
 plt.show()
 
+im_corrupt = random_motion_blur(im, [7])
+im_corrupt2 = add_gaussian_noise(im, 0, 0.2)
+# showing corrupted image47
+plt.imshow(im_corrupt2, cmap='gray')
+plt.show()
 
-# noisy = add_gaussian_noise(im, 0.88, 0.99)
-# plt.imshow(noisy, cmap='gray')
-# plt.show()
+after = restore_image(im_corrupt2, denoise_model)
+# showing the picture after repair
+plt.imshow(after, cmap='gray')
+plt.show()
+
