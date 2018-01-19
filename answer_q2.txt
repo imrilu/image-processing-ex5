@@ -1,4 +1,6 @@
-A2: the workflow could work for super resolution in the following way: we will create our training set using high-res pictures
-that will be fed to the learner in batches of random patches, along with the corresponding corrupted version of them.
-The corruption function will take a picture in high-res and lower it's res (using pyramids or other methods we've seen in class).
-restore_image function will work exactly the same way, but the size of the picture (input of model) will now be high-res.
+A2: the workflow could work for super resolution in the following way: we will create our 
+training set using high-res pictures that will be fed to the learner in batches of random 
+patches, along with the corresponding corrupted version of them. The corruption function will 
+take a picture in high-res and lower it's res (using pyramids or other methods we've seen in class).
+restore_image function will work exactly the same way, but the size of the picture (input of model) 
+will now be high-res.
