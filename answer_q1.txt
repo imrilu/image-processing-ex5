@@ -1,1 +1,4 @@
-hi
+A1: The residual blocks affected the learning performance by lowering the training error. With more residual blocks, the 
+training error got smaller (generally speaking). although there is a slight anomaly when increasing residual blocks number 
+on "denoising" learner - possibly due to overffiting of the data. In terms of the image output, image quality is better with each
+increase in the number of residual blocks.
